@@ -9,6 +9,13 @@
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 #include <linux/slab.h>
+#include <linux/random.h>
+
+#ifdef OLD_KERNAL
+#define rand prandom_u32
+#else
+#define rand get_random_u32
+#endif
 
 #define reallocate(p, new_n, new_size, flags) krealloc((p), (new_n) * (new_size), (flags))
 #define allocate_zero(new_n, new_size, flags) kzalloc((new_n) * (new_size), (flags))
@@ -55,52 +62,6 @@
         }                                                       \
         if (push) Vec_append((set), (x));                       \
     } while (0)
-
-#ifdef KERNAL_MODE
-
-typedef unsigned long long uint64_t;
-
-static bool is_seed_init = false;
-static uint64_t default_rq64_seed = 1ULL;
-static uint64_t u,v,w;
-
-
-/* Begin random number */
-/* https://github.com/alessandrocuda/randq/ */
-void srandq64(uint64_t start_seed);
-uint64_t rand(void);
-
-void srandq64(uint64_t start_seed) {
-    is_seed_init = true;
-    v = 4101842887655102017LL;
-    w = 1;
-	u = start_seed ^ v; 
-    rand();
-	v = u; 
-    rand();
-	w = v; 
-    rand();
-}
-
-uint64_t rand(void) {
-    uint64_t x;
-    if (!is_seed_init){
-        srandq64(default_rq64_seed);
-    }
-    
-	u = u * 2862933555777941757LL + 7046029254386353087LL;
-	v ^= v >> 17; 
-    v ^= v << 31; 
-    v ^= v >> 8;
-	w = 4294957665U*(w & 0xffffffff) + (w >> 32);
-	x = u ^ (u << 21); 
-    x ^= x >> 35; 
-    x ^= x << 4;
-	return (x + v) ^ w;
-}
-#endif
-
-/* End random number */
 
 typedef struct {
     int index;
