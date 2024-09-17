@@ -1,4 +1,4 @@
-#define KERNAL_MODE
+/* #define KERNAL_MODE */
 /* #define OLD_KERNAL */
 
 #ifdef KERNAL_MODE
@@ -10,6 +10,7 @@
 #include <asm/uaccess.h>
 #include <linux/slab.h>
 #include <linux/random.h>
+#include <linux/sprintf.h>
 
 #define reallocate(p, new_n, new_size, flags) krealloc((p), (new_n) * (new_size), (flags))
 #define allocate_zero(new_n, new_size, flags) kzalloc((new_n) * (new_size), (flags))
@@ -22,6 +23,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <time.h>
+#include <limits.h>
 
 #define reallocate(p, new_n, new_size, flags) realloc((p), (new_n)*(new_size))
 #define allocate_zero(new_n, new_size, flags) calloc((new_n), (new_size))
@@ -33,7 +35,7 @@
 
 #define Vec_define(T) typedef struct { T *data; int len; int capacity; } Vec_##T
 
-#define Vec_append(vec, val)                                            \
+#define Vec_push(vec, val)                                            \
     do {                                                                \
         if ((vec)->len >= (vec)->capacity)  {                           \
             if ((vec)->capacity == 0) (vec)->capacity = 2;              \
@@ -47,29 +49,62 @@
         (vec)->data[(vec)->len++] = (val);                              \
     } while(0)
 
-#define Vec_union(set, x)                                       \
+#define Vec_pop(vec)                            \
+    do {                                        \
+        if ((vec)->len > 0) (--(vec)->len);     \
+    } while (0)                                
+
+#define Vec_contains(set, x, eq, contains)      \
+    do {                                        \
+        int i;                                  \
+        bool broken = false;                    \
+        for (i = 0; i < (set)->len; ++i) {      \
+            if (eq((set)->data[i], (x))) {      \
+                *(contains) = true;             \
+                broken = true;                  \
+                break;                          \
+            }                                   \
+        }                                       \
+        if (!broken) *(contains) = false;       \
+    } while (0)
+
+#define Vec_push_new(set, x, eq)                              \
     do {                                                        \
         bool push = true;                                       \
         int i;                                                  \
         for (i = 0; i < (set)->len; ++i) {                      \
-            if ((set)->data[i] == (x)) { push=false; break; }   \
+            if (eq((set)->data[i], (x))) { push=false; break; } \
         }                                                       \
-        if (push) Vec_append((set), (x));                       \
+        if (push) Vec_push((set), (x));                       \
     } while (0)
+
+#define Vec_free(x) free_mem((x)->data)
+
+#define Vec_Vec_free(x)                                             \
+    do {                                                            \
+        int i;                                                      \
+        for (i = 0; i < (x)->len; ++i) {                            \
+            free_mem((x)->data[i].data);                            \
+        }                                                           \
+        Vec_free(x);                                                \
+    } while (0)
+
+#define eq(a, b) (a) == (b)
 
 typedef struct {
     int index;
-    int weight;
 } AdjVertex;
+
+#define AdjVertex_eq(a, b) eq((a).index, (b).index)
 
 typedef struct {
     int u;
     int v;
-    int weight;
 } Edge;
 
 Vec_define(Edge);
 Vec_define(int);
+Vec_define(Vec_int);
 Vec_define(AdjVertex);
 Vec_define(Vec_AdjVertex);
 Vec_define(char);
@@ -79,12 +114,17 @@ typedef Vec_Vec_AdjVertex Graph;
 
 void make_grid(Vec_Edge *, int width, int height);
 void randomly_sort(Vec_Edge *e);
-bool is_safe_to_insert(Vec_int set, Edge e);
+int find_set(Vec_Vec_int set, int uv);
 void Graph_insert(Graph *g, Edge e);
 int Graph_get_weight(Vec_AdjVertex av, int index);
 void kruskal_maze(Vec_Edge *e, Graph *mst);
-void make_maze(String *s, Graph *mst, int width, int height);
+void make_maze(String *s, Graph *mst, int width, int height, bool graph_mode);
+void print_graph(String *s, Graph g);
+void print_edges(String *s, Vec_Edge e);
+
+#ifdef KERNAL_MODE
 int rand(void);
+#endif
 
 #ifdef KERNAL_MODE
 ssize_t proc_read(struct file *file, char *buf, size_t count, loff_t *pos);
@@ -98,12 +138,14 @@ static struct file_operations proc_ops = {
 };
 #endif
 
+#ifdef KERNAL_MODE
 int rand(void) {
     int i;
     get_random_bytes(&i, sizeof(i));
-    i = (i/2) + INT_MAX/2; // range of [0, INT_MAX] probably
+    i = (i/2) + INT_MAX/2; /* range of [0, INT_MAX] probably */
     return i;
 }
+#endif
 
 void make_grid(Vec_Edge *e, int width, int height) {
     int row = 0;
@@ -114,12 +156,12 @@ void make_grid(Vec_Edge *e, int width, int height) {
         col = i % width;
         
         if (col < width-1) {
-            Edge x; x.u=i; x.v=i+1; x.weight=rand() % 2;
-            Vec_append(e, x);
+            Edge x; x.u=i; x.v=i+1;
+            Vec_push(e, x);
         }
         if (row < height-1) {
-            Edge x; x.u=i; x.v=i+width; x.weight=rand() % 2;
-            Vec_append(e, x);
+            Edge x; x.u=i; x.v=i+width;
+            Vec_push(e, x);
         }
     }
 }
@@ -134,101 +176,175 @@ void randomly_sort(Vec_Edge *e) {
     }
 }
 
-bool is_safe_to_insert(Vec_int set, Edge e) {
-    int strike = 0;
+int find_set(Vec_Vec_int set, int uv) {
     int i;
     for (i = 0; i < set.len; ++i) {
-        int vertex = set.data[i];
-        if (vertex == e.u) ++strike;
-        if (vertex == e.v) ++strike;
-        if (strike >= 2) return false;
-     }
+        Vec_int *inner = &set.data[i];
+        bool contains;
+        Vec_contains(inner, uv, eq, &contains);
+        if (contains) return i;
+    }
 
-    return true;
+    return 0; 
 }
 
 void Graph_insert(Graph *g, Edge e) {
-    bool push_u = true;
-    bool push_v = true;
-    Vec_AdjVertex eu = g->data[e.u];
-    Vec_AdjVertex ev = g->data[e.v];
+    Vec_AdjVertex *eu = &g->data[e.u];
+    Vec_AdjVertex *ev = &g->data[e.v];
 
-    int i;
-    for (i = 0; i < eu.len; ++i) if (eu.data[i].index == e.v) push_u = false;
-    for (i = 0; i < ev.len; ++i) if (ev.data[i].index == e.u) push_v = false;
-
-    if (push_u) { AdjVertex av; av.index=e.v; av.weight=e.weight; Vec_append(&eu, av); }
-    if (push_v) { AdjVertex av; av.index=e.u; av.weight=e.weight; Vec_append(&ev, av); }
-    
-    g->data[e.u] = eu;
-    g->data[e.v] = ev;
+    AdjVertex av;
+    av.index=e.v; Vec_push_new(eu, av, AdjVertex_eq);
+    av.index=e.u; Vec_push_new(ev, av, AdjVertex_eq);
 }
 
-int Graph_get_weight(Vec_AdjVertex av, int index) {
+bool Graph_get_adj(Vec_AdjVertex av, int index) {
     int i;
     for (i = 0; i < av.len; ++i) {
-        if (av.data[i].index == index) return av.data[i].weight;
+        if (av.data[i].index == index) return true;
     }
     
-    return 0;
+    return false;
 }
 
 void kruskal_maze(Vec_Edge *e, Graph *mst) {
-    int *data;
-    Vec_int vertex_set;
+    Vec_Vec_int vertex_sets;
     int i;
     
     randomly_sort(e);
 
-    data = allocate_zero(e->len, sizeof(int), GFP_KERNEL);
-    
-    vertex_set.data = data;
-    vertex_set.len = 0;
-    vertex_set.capacity=e->len;
+    vertex_sets.data = (Vec_int*)allocate_zero(mst->len, sizeof(Vec_int), GFP_KERNEL);;
+    vertex_sets.len = mst->len;
+    vertex_sets.capacity=mst->len;
+
+    for (i = 0; i < vertex_sets.len; ++i) {
+        Vec_int *set = &vertex_sets.data[i];
+        Vec_push(set, i);
+    }
 
     for (i = 0; i < e->len; ++i) {
-        if (is_safe_to_insert(vertex_set, e->data[i])) {
+        int u_set = find_set(vertex_sets, e->data[i].u);
+        int v_set = find_set(vertex_sets, e->data[i].v);
+        if (u_set != v_set) {
+            int j;
             Graph_insert(mst, e->data[i]);
-
-            Vec_union(&vertex_set, e->data[i].u);
-            Vec_union(&vertex_set, e->data[i].v);
+            
+            for (j = 0; j < vertex_sets.data[v_set].len; ++j) {
+                Vec_push(&vertex_sets.data[u_set], vertex_sets.data[v_set].data[j]);
+            }
+            vertex_sets.data[v_set].len = 0;
         }
     }
 
-    free_mem(data);
+    Vec_Vec_free(&vertex_sets);
 }
 
-void make_maze(String *s, Graph *mst, int width, int height) {
-    int k = 'A';
-    int i;
-    for (i = 0; i < height; ++i) {
+void print_graph(String *s, Graph g) {
+    int i, k;
+    k = 'A';
+    for (i = 0; i < g.len; ++i) {
+        Vec_AdjVertex av = g.data[i];
         int j;
-        for (j = 0; j < width; ++j) {
-            int index = i*width+j;
-            bool last_column = (j+1) % width == 0;
-            int eastern_weight = Graph_get_weight(mst->data[index], index+1);
-            
-            /* Vec_append(s, k); */
-            Vec_append(s, ' ');
-            if (!last_column && eastern_weight != 0) Vec_append(s, ' ');
-            else Vec_append(s, '#');
-            k++;
-        }
+        
+        Vec_push(s, '['); Vec_push(s, k); Vec_push(s, ']'); Vec_push(s, '-'); Vec_push(s, '>'); Vec_push(s, '['); 
+        for (j = 0; j < av.len; ++j) {
+            AdjVertex v = av.data[j];
+            Vec_push(s, 'A'+v.index); if (j < av.len-1) Vec_push(s, ' ');
 
-        Vec_append(s, '\n');
-        if (i < height - 1) {
+        }
+        Vec_push(s, ']');
+        Vec_push(s, '\n');
+        k++;
+    }
+
+    Vec_push(s, '\0');
+}
+
+void print_edges(String *s, Vec_Edge e) {
+    int i;
+    
+    for (i = 0; i < e.len; ++i) {
+        Vec_push(s, 'A'+e.data[i].u);
+        Vec_push(s, 'A'+e.data[i].v);
+        Vec_push(s, ' ');
+    }
+    Vec_push(s, '\n');
+    Vec_push(s, '\0');
+}
+
+void make_maze(String *s, Graph *mst, int width, int height, bool line_mode) {
+    int i;
+
+    if (line_mode) {
+        Vec_push(s, ' ');
+        for (i = 0; i < width*2-1; ++i) Vec_push(s, '_');
+        Vec_push(s, '\n');
+    
+        for (i = 0; i < height; ++i) {
             int j;
+        
+            Vec_push(s, '|');
             for (j = 0; j < width; ++j) {
                 int index = i*width+j;
-                int southern_weight = Graph_get_weight(mst->data[index], index+width);
-                if (southern_weight != 0) Vec_append(s, ' ');
-                else Vec_append(s, '#');
-                Vec_append(s, '#');
+            
+                bool eastern_edge = Graph_get_adj(mst->data[index], index+1);
+                bool southern_edge = Graph_get_adj(mst->data[index], index+width);
+
+                if (southern_edge) Vec_push(s, ' ');
+                else Vec_push(s, '_');
+
+                if (eastern_edge) {
+                    bool next_southern = Graph_get_adj(mst->data[index+1], index+1+width);
+                    if (next_southern) Vec_push(s, ' ');
+                    else Vec_push(s, '_');
+                } else {
+                    Vec_push(s, '|');
+                }
             }
+
+            Vec_push(s, '\n');
         }
-        Vec_append(s, '\n');
+    } else {
+        Vec_push(s, ' ');
+        for (i = 0; i < width*2-1; ++i) Vec_push(s, '@');
+        Vec_push(s, '\n');
+
+        for (i = 0; i < height; ++i) {
+            int j;
+        
+            Vec_push(s, '@');
+            for (j = 0; j < width; ++j) {
+                int index = i*width+j;
+            
+                bool eastern_edge = Graph_get_adj(mst->data[index], index+1);
+
+                Vec_push(s, ' ');
+                if (eastern_edge) {
+                    Vec_push(s, ' ');
+                } else if (j < width-1){
+                    Vec_push(s, '#');
+                }
+            }
+
+            Vec_push(s, '@');
+            Vec_push(s, '\n');
+            Vec_push(s, '@');
+            for (j = 0; j < width; ++j) {
+                int index = i*width+j;
+
+                bool southern_edge = Graph_get_adj(mst->data[index], index+width);
+                if (southern_edge) Vec_push(s, ' ');
+                else Vec_push(s, '#');
+
+                if (j < width-1){
+                    Vec_push(s, '#');
+                }
+            }
+
+            Vec_push(s, '@');
+            Vec_push(s, '\n');
+        }
     }
-    Vec_append(s, '\0');
+    Vec_push(s, '\0');
 }
 
 #ifdef KERNAL_MODE
@@ -237,26 +353,31 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
     int main(void)
 #endif
 {
-    int width = 80;
-    int height = 28;
+    int width = 9;
+    int height = 9;
     Vec_Edge grid = {0};
-    Graph minimum_spanning_tree;
+    Graph spanning_tree;
     String buffer = {0};
+    /* String buffer_two = {0}; */
+    /* String buffer_three = {0}; */
     #ifdef KERNAL_MODE
     unsigned long bytes_not_copied;
     #endif
 
-    minimum_spanning_tree.data = allocate_zero(width*height, sizeof(Vec_AdjVertex), GFP_KERNEL);
-    minimum_spanning_tree.len = width*height;
-    minimum_spanning_tree.capacity=width*height;
+    spanning_tree.data = allocate_zero(width*height, sizeof(Vec_AdjVertex), GFP_KERNEL);
+    spanning_tree.len = width*height;
+    spanning_tree.capacity=width*height;
 
     #ifndef KERNAL_MODE
     srand(time(NULL));
     #endif
     
     make_grid(&grid, width, height);
-    kruskal_maze(&grid, &minimum_spanning_tree);
-    make_maze(&buffer, &minimum_spanning_tree, width, height);
+    kruskal_maze(&grid, &spanning_tree);
+    make_maze(&buffer, &spanning_tree, width, height, true);
+
+    /* print_graph(&buffer_two, spanning_tree); */
+    /* print_edges(&buffer_three, grid); */
 
     #ifdef KERNAL_MODE
     bytes_not_copied = copy_to_user(usr_buf, buffer.data, buffer.len);
@@ -265,11 +386,15 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
     }
     #else
     printf("%s", buffer.data);
+    /* printf("%s", buffer_two.data); */
+    /* printf("%s", buffer_three.data); */
     #endif    
     
-    free_mem(buffer.data);
-    free_mem(minimum_spanning_tree.data);
-    free_mem(grid.data);
+    Vec_free(&buffer);
+    /* Vec_free(&buffer_two); */
+    /* Vec_free(&buffer_three); */
+    Vec_Vec_free(&spanning_tree);
+    Vec_free(&grid);
 
     #ifdef KERNAL_MODE
     return buffer.len;
