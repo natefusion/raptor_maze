@@ -11,12 +11,6 @@
 #include <linux/slab.h>
 #include <linux/random.h>
 
-#ifdef OLD_KERNAL
-#define rand prandom_u32
-#else
-#define rand get_random_u32
-#endif
-
 #define reallocate(p, new_n, new_size, flags) krealloc((p), (new_n) * (new_size), (flags))
 #define allocate_zero(new_n, new_size, flags) kzalloc((new_n) * (new_size), (flags))
 #define print printk
@@ -90,6 +84,7 @@ void Graph_insert(Graph *g, Edge e);
 int Graph_get_weight(Vec_AdjVertex av, int index);
 void kruskal_maze(Vec_Edge *e, Graph *mst);
 void make_maze(String *s, Graph *mst, int width, int height);
+int rand(void);
 
 #ifdef KERNAL_MODE
 ssize_t proc_read(struct file *file, char *buf, size_t count, loff_t *pos);
@@ -102,6 +97,13 @@ static struct file_operations proc_ops = {
     .read = do_maze,
 };
 #endif
+
+int rand(void) {
+    int i;
+    get_random_bytes(&i, sizeof(i));
+    i = (i/2) + INT_MAX/2; // range of [0, INT_MAX] probably
+    return i;
+}
 
 void make_grid(Vec_Edge *e, int width, int height) {
     int row = 0;
