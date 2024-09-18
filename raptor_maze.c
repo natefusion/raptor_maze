@@ -1,5 +1,4 @@
 /* #define KERNAL_MODE */
-/* #define OLD_KERNAL */
 
 #ifdef KERNAL_MODE
 
@@ -47,6 +46,8 @@ void Arena_init(Arena *arena);
 void Arena_deinit(Arena *arena);
 
 static Arena arena;
+static int maze_width = 9;
+static int maze_height = 9;
 
 void *Arena_alloc(Arena *arena, int n, int size) {
     void *p;
@@ -175,14 +176,17 @@ int rand(void);
 #endif
 
 #ifdef KERNAL_MODE
-ssize_t proc_read(struct file *file, char *buf, size_t count, loff_t *pos);
 int init(void);
 void deinit(void);
 ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *pos);
+#ifdef KERNAL_MODE
+    ssize_t get_input(struct file *file, const char __user *usr_buf, size_t count, loff_t *pos);
+#endif
 
 static struct file_operations proc_ops = {
     .owner = THIS_MODULE,
     .read = do_maze,
+    .write = get_input,
 };
 #endif
 
@@ -398,9 +402,7 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
 #else
     int main(void)
 #endif
-{
-    int width = 9;
-    int height = 9;
+    {
     Vec_Edge grid = {0};
     Graph spanning_tree;
     String buffer = {0};
@@ -410,19 +412,23 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
     unsigned long bytes_not_copied;
     #endif
     Arena_init(&arena);
+#ifndef KERNAL_MODE
+    scanf("%d%d", &maze_width, &maze_height);
+#endif
 
-    spanning_tree.data = Arena_alloc(&arena, width*height, sizeof(Vec_AdjVertex));
 
-    spanning_tree.len = width*height;
-    spanning_tree.capacity=width*height;
+    spanning_tree.data = Arena_alloc(&arena, maze_width*maze_height, sizeof(Vec_AdjVertex));
+
+    spanning_tree.len = maze_width*maze_height;
+    spanning_tree.capacity=maze_width*maze_height;
 
     #ifndef KERNAL_MODE
     srand(time(NULL));
     #endif
     
-    make_grid(&grid, width, height);
+    make_grid(&grid, maze_width, maze_height);
     kruskal_maze(&grid, &spanning_tree);
-    make_maze(&buffer, &spanning_tree, width, height, true);
+    make_maze(&buffer, &spanning_tree, maze_width, maze_height, true);
 
     /* print_graph(&buffer_two, spanning_tree); */
     /* print_edges(&buffer_three, grid); */
@@ -444,17 +450,12 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
     return buffer.len;
     #else
     return 0;
-    #endif
+#endif
 }
 
 #ifdef KERNAL_MODE
 int init(void) {
-    proc_create("raptor_maze", 0, NULL,
-                #ifndef OLD_KERNAL
-                (struct proc_ops*)
-                #endif
-                &proc_ops
-        );
+    proc_create("raptor_maze", 0, NULL, &proc_ops);
     print(KERN_INFO "/proc/raptor_maze created\n");
     return 0;
 }
@@ -464,6 +465,10 @@ void deinit(void) {
     print(KERN_INFO "proc/raptor_maze removed\n");
 }
 
+ssize_t get_input(struct file *file, const char __user *usr_buf, size_t count, loff_t *pos) {
+    sscanf(usr_buf, "%d%d", &maze_width, &maze_height);
+    return count; /* idk what it wants me to return */
+}
 
 module_init(init);
 module_exit(deinit);
