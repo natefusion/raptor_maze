@@ -94,21 +94,19 @@ void Arena_deinit(Arena *arena) {
 
 #define Vec_define(T) typedef struct { T *data; int len; int capacity; } Vec_##T
 
-#define Vec_push_arena(vec, val, arena)                                 \
+#define Vec_push(vec, val)                                              \
     do {                                                                \
         if ((vec)->len >= (vec)->capacity)  {                           \
             if ((vec)->capacity == 0) (vec)->capacity = 2;              \
             else (vec)->capacity *= 2;                                  \
                                                                         \
-            (vec)->data = Arena_realloc(&(arena),                       \
+            (vec)->data = Arena_realloc(&arena,                         \
                                         (vec)->data,                    \
                                         (vec)->capacity,                \
                                         sizeof(*(vec)->data));          \
         }                                                               \
         (vec)->data[(vec)->len++] = (val);                              \
     } while(0)
-
-#define Vec_push(vec, val) Vec_push_arena(vec, val, arena)
 
 #define Vec_pop(vec)                            \
     do {                                        \
@@ -129,17 +127,15 @@ void Arena_deinit(Arena *arena) {
         if (!broken) *(contains) = false;       \
     } while (0)
 
-#define Vec_push_new_arena(set, x, arena, eq)                   \
+#define Vec_push_new(set, x, eq)                                \
     do {                                                        \
         bool push = true;                                       \
         int i;                                                  \
         for (i = 0; i < (set)->len; ++i) {                      \
             if (eq((set)->data[i], (x))) { push=false; break; } \
         }                                                       \
-        if (push) Vec_push_arena((set), (x), arena);            \
+        if (push) Vec_push((set), (x));                         \
     } while (0)
-
-#define Vec_push_new(set, x, eq) Vec_push_new_arena(set, x, arena, eq)
 
 #define eq(a, b) (a) == (b)
 
