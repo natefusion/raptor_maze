@@ -19,6 +19,8 @@
 
 #else
 
+#define GFP_KERNEL (void)0
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -33,21 +35,75 @@
 
 #endif
 
+typedef struct {
+    void **data;
+    int len;
+    int capacity;
+} Arena;
+
+static Arena arena;
+
+void *Arena_alloc(Arena *arena, int n, int size) {
+    void *p;
+    if (arena->len >= arena->capacity) {
+        if (arena->capacity == 0) arena->capacity = 2;
+        else arena->capacity *= 2;
+        arena->data = reallocate(arena->data,
+                                 arena->capacity,
+                                 sizeof(void*),
+                                 GFP_KERNEL);
+    }
+    p = allocate_zero(n, size, GFP_KERNEL);
+    arena->data[arena->len++] = p;
+    
+    return p;
+}
+
+void *Arena_realloc(Arena *arena, void *p, int n, int size) {
+    int i;
+    for (i = 0; i < arena->len; ++i) {
+        if (arena->data[i] == p) {
+            void *new_p = reallocate(p, n, size, GFP_KERNEL);
+            arena->data[i] = new_p;
+            return new_p;
+        }
+    }
+
+    return Arena_alloc(arena, n, size);
+}
+
+void Arena_init(Arena *arena) {
+    arena->data = 0;
+    arena->len = 0;
+    arena->capacity = 0;
+}
+
+void Arena_deinit(Arena *arena) {
+    int i;
+    for (i = 0; i < arena->len; ++i) {
+        free_mem(arena->data[i]);
+    }
+
+    free_mem(arena->data);
+}
+
 #define Vec_define(T) typedef struct { T *data; int len; int capacity; } Vec_##T
 
-#define Vec_push(vec, val)                                            \
+#define Vec_push_arena(vec, val, arena)                                 \
     do {                                                                \
         if ((vec)->len >= (vec)->capacity)  {                           \
             if ((vec)->capacity == 0) (vec)->capacity = 2;              \
             else (vec)->capacity *= 2;                                  \
                                                                         \
-            (vec)->data = reallocate((vec)->data,                       \
-                                     (vec)->capacity,                   \
-                                     sizeof(*(vec)->data),              \
-                                     GFP_KERNEL);                       \
+            (vec)->data = Arena_realloc(&(arena),                       \
+                                        (vec)->data,                    \
+                                        (vec)->capacity,                \
+                                        sizeof(*(vec)->data));          \
         }                                                               \
         (vec)->data[(vec)->len++] = (val);                              \
     } while(0)
+
+#define Vec_push(vec, val) Vec_push_arena(vec, val, arena)
 
 #define Vec_pop(vec)                            \
     do {                                        \
@@ -68,26 +124,17 @@
         if (!broken) *(contains) = false;       \
     } while (0)
 
-#define Vec_push_new(set, x, eq)                              \
+#define Vec_push_new_arena(set, x, arena, eq)                   \
     do {                                                        \
         bool push = true;                                       \
         int i;                                                  \
         for (i = 0; i < (set)->len; ++i) {                      \
             if (eq((set)->data[i], (x))) { push=false; break; } \
         }                                                       \
-        if (push) Vec_push((set), (x));                       \
+        if (push) Vec_push_arena((set), (x), arena);            \
     } while (0)
 
-#define Vec_free(x) free_mem((x)->data)
-
-#define Vec_Vec_free(x)                                             \
-    do {                                                            \
-        int i;                                                      \
-        for (i = 0; i < (x)->len; ++i) {                            \
-            free_mem((x)->data[i].data);                            \
-        }                                                           \
-        Vec_free(x);                                                \
-    } while (0)
+#define Vec_push_new(set, x, eq) Vec_push_new_arena(set, x, arena, eq)
 
 #define eq(a, b) (a) == (b)
 
@@ -207,18 +254,20 @@ bool Graph_get_adj(Vec_AdjVertex av, int index) {
 }
 
 void kruskal_maze(Vec_Edge *e, Graph *mst) {
+    Arena scratch;
     Vec_Vec_int vertex_sets;
     int i;
-    
+
+    Arena_init(&scratch);
     randomly_sort(e);
 
-    vertex_sets.data = (Vec_int*)allocate_zero(mst->len, sizeof(Vec_int), GFP_KERNEL);;
+    vertex_sets.data = Arena_alloc(&scratch, mst->len, sizeof(Vec_int));
     vertex_sets.len = mst->len;
     vertex_sets.capacity=mst->len;
 
     for (i = 0; i < vertex_sets.len; ++i) {
         Vec_int *set = &vertex_sets.data[i];
-        Vec_push(set, i);
+        Vec_push_arena(set, i, scratch);
     }
 
     for (i = 0; i < e->len; ++i) {
@@ -229,13 +278,13 @@ void kruskal_maze(Vec_Edge *e, Graph *mst) {
             Graph_insert(mst, e->data[i]);
             
             for (j = 0; j < vertex_sets.data[v_set].len; ++j) {
-                Vec_push(&vertex_sets.data[u_set], vertex_sets.data[v_set].data[j]);
+                Vec_push_arena(&vertex_sets.data[u_set], vertex_sets.data[v_set].data[j], scratch);
             }
             vertex_sets.data[v_set].len = 0;
         }
     }
 
-    Vec_Vec_free(&vertex_sets);
+    Arena_deinit(&scratch);
 }
 
 void print_graph(String *s, Graph g) {
@@ -363,8 +412,10 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
     #ifdef KERNAL_MODE
     unsigned long bytes_not_copied;
     #endif
+    Arena_init(&arena);
 
-    spanning_tree.data = allocate_zero(width*height, sizeof(Vec_AdjVertex), GFP_KERNEL);
+    spanning_tree.data = Arena_alloc(&arena, width*height, sizeof(Vec_AdjVertex));
+
     spanning_tree.len = width*height;
     spanning_tree.capacity=width*height;
 
@@ -390,11 +441,7 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
     /* printf("%s", buffer_three.data); */
     #endif    
     
-    Vec_free(&buffer);
-    /* Vec_free(&buffer_two); */
-    /* Vec_free(&buffer_three); */
-    Vec_Vec_free(&spanning_tree);
-    Vec_free(&grid);
+    Arena_deinit(&arena);
 
     #ifdef KERNAL_MODE
     return buffer.len;
