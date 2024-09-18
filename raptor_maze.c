@@ -41,6 +41,11 @@ typedef struct {
     int capacity;
 } Arena;
 
+void *Arena_alloc(Arena *arena, int n, int size);
+void *Arena_realloc(Arena *arena, void *p, int n, int size);
+void Arena_init(Arena *arena);
+void Arena_deinit(Arena *arena);
+
 static Arena arena;
 
 void *Arena_alloc(Arena *arena, int n, int size) {
@@ -163,7 +168,7 @@ void make_grid(Vec_Edge *, int width, int height);
 void randomly_sort(Vec_Edge *e);
 int find_set(Vec_Vec_int set, int uv);
 void Graph_insert(Graph *g, Edge e);
-int Graph_get_weight(Vec_AdjVertex av, int index);
+bool Graph_get_adj(Vec_AdjVertex av, int index);
 void kruskal_maze(Vec_Edge *e, Graph *mst);
 void make_maze(String *s, Graph *mst, int width, int height, bool graph_mode);
 void print_graph(String *s, Graph g);
@@ -254,20 +259,18 @@ bool Graph_get_adj(Vec_AdjVertex av, int index) {
 }
 
 void kruskal_maze(Vec_Edge *e, Graph *mst) {
-    Arena scratch;
     Vec_Vec_int vertex_sets;
     int i;
 
-    Arena_init(&scratch);
     randomly_sort(e);
 
-    vertex_sets.data = Arena_alloc(&scratch, mst->len, sizeof(Vec_int));
+    vertex_sets.data = Arena_alloc(&arena, mst->len, sizeof(Vec_int));
     vertex_sets.len = mst->len;
     vertex_sets.capacity=mst->len;
 
     for (i = 0; i < vertex_sets.len; ++i) {
         Vec_int *set = &vertex_sets.data[i];
-        Vec_push_arena(set, i, scratch);
+        Vec_push(set, i);
     }
 
     for (i = 0; i < e->len; ++i) {
@@ -278,13 +281,11 @@ void kruskal_maze(Vec_Edge *e, Graph *mst) {
             Graph_insert(mst, e->data[i]);
             
             for (j = 0; j < vertex_sets.data[v_set].len; ++j) {
-                Vec_push_arena(&vertex_sets.data[u_set], vertex_sets.data[v_set].data[j], scratch);
+                Vec_push(&vertex_sets.data[u_set], vertex_sets.data[v_set].data[j]);
             }
             vertex_sets.data[v_set].len = 0;
         }
     }
-
-    Arena_deinit(&scratch);
 }
 
 void print_graph(String *s, Graph g) {
