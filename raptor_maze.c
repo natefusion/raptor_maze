@@ -94,7 +94,7 @@ void Arena_deinit(Arena *arena);
 
 void make_grid(Vec_Edge *e, int width, int height);
 void randomly_sort(Vec_Edge *e);
-int find_set(Vec_Vec_int set, int uv);
+int find_set(Vec_int parent, int uv);
 void Graph_insert(Graph *g, Edge e);
 bool Graph_get_adjacent(Vec4_int av, int index);
 void kruskal_maze(Vec_Edge *e, Graph *mst);
@@ -203,17 +203,13 @@ void randomly_sort(Vec_Edge *e) {
     }
 }
 
-int find_set(Vec_Vec_int set, int uv) {
-    int i;
-    for (i = 0; i < set.len; ++i) {
-        Vec_int *inner = &set.data[i];
-        int j;
-        for (j = 0; j < inner->len; ++j) {
-            if (inner->data[j] == uv) return i;                
-        }
+int find_set(Vec_int parent, int uv) {
+    int x = uv;
+    for (;;) {
+        if (parent.data[x] == x) break;
+        else x = parent.data[x];
     }
-
-    return 0; 
+    return x;
 }
 
 void Graph_insert(Graph *g, Edge e) {
@@ -231,34 +227,37 @@ bool Graph_get_adjacent(Vec4_int av, int index) {
 }
 
 void kruskal_maze(Vec_Edge *e, Graph *mst) {
-    Vec_Vec_int vertex_sets = {0};
+    Vec_int parent, rank;
     int i;
 
     randomly_sort(e);
 
     Vec_alloc_full(mst, maze_width*maze_height);
-    Vec_alloc_full(&vertex_sets, mst->len);
+    Vec_alloc_full(&parent, mst->len);
+    Vec_alloc_full(&rank, mst->len);
 
-    for (i = 0; i < vertex_sets.len; ++i) {
-        Vec_int *set = &vertex_sets.data[i];
-        Vec_alloc_empty(set, mst->len);        
-        Vec_push(set, i);
+    for (i = 0; i < parent.len; ++i) {
+        parent.data[i] = i;
     }
 
     for (i = 0; i < e->len; ++i) {
-        int u_set_idx = find_set(vertex_sets, e->data[i].u);
-        int v_set_idx = find_set(vertex_sets, e->data[i].v);
-        if (u_set_idx != v_set_idx) {
-            int j;
-            Vec_int *v_set = &vertex_sets.data[v_set_idx];
-            Vec_int *u_set = &vertex_sets.data[u_set_idx];
-            
+        int u = e->data[i].u;
+        int v = e->data[i].v;
+        
+        int uset = find_set(parent, u);
+        int vset = find_set(parent, v);
+
+        if (uset != vset) {
             Graph_insert(mst, e->data[i]);
-            
-            for (j = 0; j < v_set->len; ++j) {
-                Vec_push(u_set, v_set->data[j]);
+
+            if (rank.data[uset] < rank.data[vset]) {
+                parent.data[uset] = vset;
+            } else if (rank.data[uset] > rank.data[vset]) {
+                parent.data[vset] = uset;
+            } else {
+                parent.data[vset] = uset;
+                ++rank.data[uset];
             }
-            v_set->len = 0;
         }
     }
 }
@@ -314,7 +313,7 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
         Arena_init(&arena);
         
 #ifndef KERNAL_MODE
-        scanf("%d%d", &maze_width, &maze_height);
+        bytes_not_copied = scanf("%d%d", &maze_width, &maze_height); // setting ret value just to avoid compiler error
         srand(time(NULL));
         (void)bytes_not_copied;
 #endif
