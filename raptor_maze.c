@@ -1,4 +1,4 @@
-/* #define KERNAL_MODE */
+#define KERNAL_MODE
 
 #ifdef KERNAL_MODE
 
@@ -87,7 +87,28 @@ typedef Vec_char String;
 typedef Vec_Vec4_int Graph;
 typedef Vec_voidptr Arena;
 
-static Arena arena;
+void *Arena_alloc(Arena *arena, int n, int size);
+void *Arena_realloc(Arena *arena, void *p, int n, int size);
+void Arena_init(Arena *arena);
+void Arena_deinit(Arena *arena);
+
+void make_grid(Vec_Edge *e, int width, int height);
+void randomly_sort(Vec_Edge *e);
+int find_set(Vec_Vec_int set, int uv);
+void Graph_insert(Graph *g, Edge e);
+bool Graph_get_adjacent(Vec4_int av, int index);
+void kruskal_maze(Vec_Edge *e, Graph *mst);
+void make_maze_line(String *s, Graph *mst, int width, int height);
+
+#ifdef KERNAL_MODE
+int rand(void);
+int init(void);
+void deinit(void);
+ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *pos);
+ssize_t get_input(struct file *file, const char __user *usr_buf, size_t count, loff_t *pos);
+#endif
+
+static Arena arena = {0};
 static int maze_width = 10;
 static int maze_height = 10;
 
@@ -97,30 +118,6 @@ static struct file_operations proc_ops = {
     .read = do_maze,
     .write = get_input,
 };
-#endif
-
-void *Arena_alloc(Arena *arena, int n, int size);
-void *Arena_realloc(Arena *arena, void *p, int n, int size);
-void Arena_init(Arena *arena);
-void Arena_deinit(Arena *arena);
-
-void make_grid(Vec_Edge *, int width, int height);
-void randomly_sort(Vec_Edge *e);
-int find_set(Vec_Vec_int set, int uv);
-void Graph_insert(Graph *g, Edge e);
-bool Graph_get_adj(Vec4_int av, int index);
-void kruskal_maze(Vec_Edge *e, Graph *mst);
-void make_maze_line(String *s, Graph *mst, int width, int height);
-void make_maze_hash(String *s, Graph *mst, int width, int height);
-void print_graph(String *s, Graph g);
-void print_edges(String *s, Vec_Edge e);
-
-#ifdef KERNAL_MODE
-int rand(void);
-int init(void);
-void deinit(void);
-ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *pos);
-ssize_t get_input(struct file *file, const char __user *usr_buf, size_t count, loff_t *pos);
 #endif
 
 void *Arena_alloc(Arena *arena, int n, int size) {
@@ -224,7 +221,7 @@ void Graph_insert(Graph *g, Edge e) {
     Vec_push(&g->data[e.v], e.u);
 }
 
-bool Graph_get_adj(Vec4_int av, int index) {
+bool Graph_get_adjacent(Vec4_int av, int index) {
     int i;
     for (i = 0; i < 4; ++i) {
         if (av.data[i] == index) return true;
@@ -271,36 +268,36 @@ void make_maze_line(String *s, Graph *mst, int width, int height) {
 
     Vec_alloc_empty(s, maze_width*2*maze_height);
     
-    Vec_push(s, ' ');
-    for (i = 0; i < width*2-1; ++i) Vec_push(s, '_');
-    Vec_push(s, '\n');
+    Vec_push_extend(s, ' ');
+    for (i = 0; i < width*2-1; ++i) Vec_push_extend(s, '_');
+    Vec_push_extend(s, '\n');
     
     for (i = 0; i < height; ++i) {
         int j;
         
-        Vec_push(s, '|');
+        Vec_push_extend(s, '|');
         for (j = 0; j < width; ++j) {
             int index = i*width+j;
             
-            bool eastern_edge = Graph_get_adj(mst->data[index], index+1);
-            bool southern_edge = Graph_get_adj(mst->data[index], index+width);
+            bool eastern_edge = Graph_get_adjacent(mst->data[index], index+1);
+            bool southern_edge = Graph_get_adjacent(mst->data[index], index+width);
             
-            if (southern_edge) Vec_push(s, ' ');
-            else Vec_push(s, '_');
+            if (southern_edge) Vec_push_extend(s, ' ');
+            else Vec_push_extend(s, '_');
             
             if (eastern_edge) {
-                bool next_southern = Graph_get_adj(mst->data[index+1], index+1+width);
-                if (next_southern) Vec_push(s, ' ');
-                else Vec_push(s, '_');
+                bool next_southern = Graph_get_adjacent(mst->data[index+1], index+1+width);
+                if (next_southern) Vec_push_extend(s, ' ');
+                else Vec_push_extend(s, '_');
             } else {
-                Vec_push(s, '|');
+                Vec_push_extend(s, '|');
             }
         }
         
-        Vec_push(s, '\n');
+        Vec_push_extend(s, '\n');
     }
 
-    Vec_push(s, '\0');
+    Vec_push_extend(s, '\0');
 }
 
 #ifdef KERNAL_MODE
@@ -312,17 +309,16 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
         Vec_Edge grid = {0};
         Graph spanning_tree = {0};
         String buffer = {0};
-#ifdef KERNAL_MODE
         unsigned long bytes_not_copied;
-#endif
+        
         Arena_init(&arena);
-/* #ifndef KERNAL_MODE */
-/*         scanf("%d%d", &maze_width, &maze_height); */
-/* #endif */
         
 #ifndef KERNAL_MODE
+        scanf("%d%d", &maze_width, &maze_height);
         srand(time(NULL));
+        (void)bytes_not_copied;
 #endif
+        
         make_grid(&grid, maze_width, maze_height);
         kruskal_maze(&grid, &spanning_tree);
         make_maze_line(&buffer, &spanning_tree, maze_width, maze_height);
