@@ -414,7 +414,8 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
     Vec_Edge grid = {0};
     Graph spanning_tree = {0};
     String buffer = {0};
-    unsigned long bytes_not_copied;
+
+    if (*pos > 0) return 0;
     
     Arena_init(&arena);
     
@@ -422,14 +423,23 @@ ssize_t do_maze(struct file *file, char __user *usr_buf, size_t count, loff_t *p
     kruskal_maze(&grid, &spanning_tree);
     make_maze_line(&buffer, &spanning_tree, maze_width, maze_height);
     
-    bytes_not_copied = copy_to_user(usr_buf, buffer.data, buffer.len);
-    if (bytes_not_copied > 0) {
+    if (copy_to_user(usr_buf, buffer.data, buffer.len)) {
         printk(KERN_INFO "proc/raptor_maze: UH OH\n");
     }
     
     Arena_deinit(&arena);
+
+    *pos = buffer.len;
     
     return buffer.len;
+}
+
+ssize_t get_input(struct file *file, const char __user *usr_buf, size_t count, loff_t *pos) {
+    if (2 != sscanf(usr_buf, "%d%d", &maze_width, &maze_height)) {
+        printk("/proc/raptor_maze: input width then height ONLY! Separated by whitespace\n");
+    }
+    *pos = count;
+    return count;
 }
 
 int init(void) {
@@ -443,14 +453,9 @@ void deinit(void) {
     printk(KERN_INFO "/proc/raptor_maze removed\n");
 }
 
-ssize_t get_input(struct file *file, const char __user *usr_buf, size_t count, loff_t *pos) {
-    sscanf(usr_buf, "%d%d", &maze_width, &maze_height);
-    return count; /* idk what it wants actually me to return. It doesn't crash so I guess it's fine. */
-}
-
 module_init(init);
 module_exit(deinit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Maze, but kernal");
+MODULE_DESCRIPTION("Maze, but kernal"); /* haha it's spelled wrong */
 MODULE_AUTHOR("Nathan Piel");
