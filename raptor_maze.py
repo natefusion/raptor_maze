@@ -1,6 +1,9 @@
 import os
 import sys
 
+if (os.system('lsmod | grep -q raptor_maze') != 0):
+    os.system('sudo insmod raptor_maze.ko')
+
 if (len(sys.argv) == 3):
     width = sys.argv[1]
     height = sys.argv[2]
